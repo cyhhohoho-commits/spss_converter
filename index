@@ -1,0 +1,688 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SAV → Excel 변환기</title>
+  <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    :root {
+      --bg: #F4F5F7;
+      --surface: #FFFFFF;
+      --border: #E4E6EA;
+      --border-hover: #C8CBCF;
+      --text-primary: #1A1D23;
+      --text-secondary: #6B7280;
+      --text-tertiary: #9CA3AF;
+      --accent: #1D9E75;
+      --accent-light: #E1F5EE;
+      --accent-dark: #177A5C;
+      --blue: #2563EB;
+      --blue-light: #EFF6FF;
+      --radius: 12px;
+    }
+    body {
+      font-family: 'Noto Sans KR', sans-serif;
+      background: var(--bg);
+      min-height: 100vh;
+      padding: 2.5rem 1rem;
+      color: var(--text-primary);
+    }
+    .wrap { max-width: 580px; margin: 0 auto; }
+    .header { display: flex; align-items: center; gap: 14px; margin-bottom: 2rem; animation: fadeUp 0.4s ease both; }
+    .logo { width: 44px; height: 44px; border-radius: 13px; background: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 12px rgba(29,158,117,0.25); }
+    .logo svg { width: 22px; height: 22px; }
+    .header-text h1 { font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+    .header-text p { font-size: 12px; color: var(--text-secondary); margin-top: 2px; }
+    .card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 1.5rem; margin-bottom: 12px; animation: fadeUp 0.4s ease both; }
+    .card:nth-child(2) { animation-delay: 0.05s; }
+    .card:nth-child(3) { animation-delay: 0.10s; }
+    .card-title { font-size: 14px; font-weight: 600; margin-bottom: 4px; display: flex; align-items: center; gap: 8px; }
+    .card-title .tag { font-size: 10px; font-weight: 500; padding: 2px 7px; border-radius: 20px; background: var(--accent-light); color: var(--accent); }
+    .card-title .tag.blue { background: var(--blue-light); color: var(--blue); }
+    .card-desc { font-size: 12px; color: var(--text-secondary); margin-bottom: 1rem; line-height: 1.6; }
+    .sheet-list { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 1.25rem; }
+    .sheet-tag { font-size: 11px; padding: 3px 10px; border-radius: 6px; border: 1px solid var(--border); color: var(--text-secondary); background: var(--bg); }
+    .drop-zone { border: 1.5px dashed var(--border); border-radius: 10px; padding: 1.5rem; text-align: center; cursor: pointer; transition: border-color 0.18s, background 0.18s; position: relative; }
+    .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-light); }
+    .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
+    .drop-icon { font-size: 28px; margin-bottom: 8px; }
+    .drop-text { font-size: 13px; font-weight: 500; color: var(--text-primary); }
+    .drop-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 3px; }
+    .file-selected { display: none; align-items: center; gap: 10px; padding: 10px 14px; background: var(--accent-light); border: 1px solid #A7E3CE; border-radius: 8px; margin-top: 10px; }
+    .file-selected.show { display: flex; }
+    .file-name { flex: 1; font-size: 12px; font-weight: 500; color: var(--accent-dark); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .file-clear { font-size: 16px; color: var(--accent); cursor: pointer; line-height: 1; background: none; border: none; padding: 0; }
+    .btn { width: 100%; padding: 12px; border-radius: 8px; border: none; font-family: 'Noto Sans KR', sans-serif; font-size: 14px; font-weight: 500; cursor: pointer; margin-top: 12px; transition: background 0.18s, transform 0.1s, opacity 0.18s; }
+    .btn:active { transform: scale(0.98); }
+    .btn-primary { background: var(--accent); color: white; }
+    .btn-primary:hover { background: var(--accent-dark); }
+    .btn-primary:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+    .btn-blue { background: var(--blue); color: white; }
+    .btn-blue:hover { background: #1d4ed8; }
+    .btn-blue:disabled { opacity: 0.45; cursor: not-allowed; transform: none; }
+    .log-wrap { background: #1A1D23; border-radius: 10px; padding: 14px 16px; margin-top: 10px; max-height: 130px; overflow-y: auto; display: none; }
+    .log-wrap.show { display: block; }
+    .log-line { font-size: 11px; font-family: 'Consolas', monospace; line-height: 1.8; }
+    .log-line.info  { color: #6EE7B7; }
+    .log-line.error { color: #FCA5A5; }
+    .log-line.warn  { color: #FCD34D; }
+    .progress-wrap { margin-top: 10px; display: none; }
+    .progress-wrap.show { display: block; }
+    .progress-bar-bg { height: 4px; background: var(--border); border-radius: 99px; overflow: hidden; }
+    .progress-bar { height: 100%; background: var(--accent); border-radius: 99px; width: 0%; transition: width 0.3s ease; }
+    .progress-text { font-size: 11px; color: var(--text-tertiary); margin-top: 5px; text-align: center; }
+    .footer { margin-top: 1.75rem; padding-top: 1.25rem; border-top: 1px solid var(--border); font-size: 11px; color: var(--text-tertiary); text-align: center; animation: fadeUp 0.4s 0.2s ease both; }
+    @keyframes fadeUp { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  </style>
+</head>
+<body>
+<div class="wrap">
+  <div class="header">
+    <div class="logo">
+      <svg viewBox="0 0 22 22" fill="none">
+        <rect x="2" y="2" width="7" height="7" rx="2" fill="white" opacity="0.9"/>
+        <rect x="11" y="2" width="7" height="7" rx="2" fill="white" opacity="0.55"/>
+        <rect x="2" y="11" width="7" height="7" rx="2" fill="white" opacity="0.55"/>
+        <rect x="11" y="11" width="7" height="7" rx="2" fill="white" opacity="0.25"/>
+      </svg>
+    </div>
+    <div class="header-text">
+      <h1>SAV → Excel 변환기</h1>
+      <p>SPSS .sav 파일을 엑셀로 변환합니다</p>
+    </div>
+  </div>
+
+  <!-- 사업부용 -->
+  <div class="card">
+    <div class="card-title">Sav to xlsx <span class="tag">사업부용</span></div>
+    <div class="card-desc">Numeric · String · Variable Labels · Codebook 4개 시트로 변환<br>헤더 스타일 및 열 너비 자동 적용</div>
+    <div class="sheet-list">
+      <span class="sheet-tag">?? Numeric</span>
+      <span class="sheet-tag">?? String</span>
+      <span class="sheet-tag">?? Variable Labels</span>
+      <span class="sheet-tag">?? Codebook</span>
+    </div>
+    <div class="drop-zone" id="drop1">
+      <input type="file" id="file1" accept=".sav">
+      <div class="drop-icon">??</div>
+      <div class="drop-text">SAV 파일을 여기에 끌어다 놓거나 클릭</div>
+      <div class="drop-sub">.sav 파일만 지원</div>
+    </div>
+    <div class="file-selected" id="selected1">
+      <span class="file-name" id="fname1"></span>
+      <button class="file-clear" onclick="clearFile(1)">?</button>
+    </div>
+    <div class="progress-wrap" id="prog1">
+      <div class="progress-bar-bg"><div class="progress-bar" id="pbar1"></div></div>
+      <div class="progress-text" id="ptext1">처리 중...</div>
+    </div>
+    <div class="log-wrap" id="log1"></div>
+    <button class="btn btn-primary" id="btn1" onclick="convert(1)" disabled>변환 시작</button>
+  </div>
+
+  <!-- 논문용 -->
+  <div class="card">
+    <div class="card-title">Sav to xlsx <span class="tag blue">논문용</span></div>
+    <div class="card-desc">data · label · code 3개 시트로 변환<br>보기 번호 자동 제거 및 코드북 구조화</div>
+    <div class="sheet-list">
+      <span class="sheet-tag">?? data</span>
+      <span class="sheet-tag">?? label</span>
+      <span class="sheet-tag">?? code</span>
+    </div>
+    <div class="drop-zone" id="drop2">
+      <input type="file" id="file2" accept=".sav">
+      <div class="drop-icon">??</div>
+      <div class="drop-text">SAV 파일을 여기에 끌어다 놓거나 클릭</div>
+      <div class="drop-sub">.sav 파일만 지원</div>
+    </div>
+    <div class="file-selected" id="selected2">
+      <span class="file-name" id="fname2"></span>
+      <button class="file-clear" onclick="clearFile(2)">?</button>
+    </div>
+    <div class="progress-wrap" id="prog2">
+      <div class="progress-bar-bg"><div class="progress-bar" id="pbar2"></div></div>
+      <div class="progress-text" id="ptext2">처리 중...</div>
+    </div>
+    <div class="log-wrap" id="log2"></div>
+    <button class="btn btn-blue" id="btn2" onclick="convert(2)" disabled>변환 시작</button>
+  </div>
+
+  <div class="footer">데이터처리팀 · SAV to Excel Converter</div>
+</div>
+
+<script>
+// ─────────────────────────────────────────────────────────────────────────
+// SAV 바이너리 파서
+// Record types (SPSS SAV format):
+//   2  = Variable record
+//   3  = Value label record
+//   4  = Value label variables record
+//   6  = Document record
+//   7  = Additional info record
+//   999 = End of dictionary
+// ─────────────────────────────────────────────────────────────────────────
+const SAV = (() => {
+
+  // 코드페이지 → TextDecoder 레이블 매핑
+  const CODEPAGE_MAP = {
+    874: 'windows-874', 932: 'shift-jis', 936: 'gbk',
+    949: 'euc-kr', 950: 'big5', 1200: 'utf-16le',
+    1250: 'windows-1250', 1251: 'windows-1251', 1252: 'windows-1252',
+    1253: 'windows-1253', 1254: 'windows-1254', 1255: 'windows-1255',
+    1256: 'windows-1256', 1257: 'windows-1257', 1258: 'windows-1258',
+    28591: 'iso-8859-1', 51949: 'euc-kr', 65001: 'utf-8'
+  };
+  const ENCODING_NAME_MAP = {
+    'utf-8':'utf-8','utf8':'utf-8','us-ascii':'utf-8',
+    'euc-kr':'euc-kr','euckr':'euc-kr','cp949':'euc-kr',
+    'ms949':'euc-kr','korean':'euc-kr',
+    'shift-jis':'shift-jis','shift_jis':'shift-jis','sjis':'shift-jis',
+    'gbk':'gbk','gb2312':'gbk','gb18030':'gbk',
+    'big5':'big5','windows-1252':'windows-1252','iso-8859-1':'iso-8859-1',
+  };
+
+  function readStr(buf, pos, len, enc) {
+    const raw = buf.slice(pos, pos + len);
+    try {
+      return new TextDecoder(enc || 'utf-8').decode(raw).replace(/\u0000/g, '').trimEnd();
+    } catch(e) {
+      try { return new TextDecoder('utf-8').decode(raw).replace(/\u0000/g, '').trimEnd(); }
+      catch(e2) { return new TextDecoder('latin1').decode(raw).replace(/\u0000/g, '').trimEnd(); }
+    }
+  }
+
+  function detectEncoding(buf, view, le) {
+    let enc = 'utf-8';
+    let pos = 176;
+    // Quick scan for type-7 records only (to find encoding info)
+    while (pos < buf.byteLength - 4) {
+      const recType = view.getInt32(pos, le); pos += 4;
+      if (recType === 999) break;
+      if (recType === 7) {
+        const subtype = view.getInt32(pos, le); pos += 4;
+        const size    = view.getInt32(pos, le); pos += 4;
+        const count   = view.getInt32(pos, le); pos += 4;
+        const dlen    = size * count;
+        if (subtype === 20) {
+          // Encoding name string (e.g. "UTF-8", "EUC-KR", "windows-1252")
+          const raw = new TextDecoder('latin1').decode(buf.slice(pos, pos + dlen)).replace(/\u0000/g,'').trim().toLowerCase();
+          if (ENCODING_NAME_MAP[raw]) enc = ENCODING_NAME_MAP[raw];
+        } else if (subtype === 3 && dlen >= 32) {
+          // Machine integer info: byte 28-31 = char_code (codepage number)
+          const cp = view.getInt32(pos + 28, le);
+          if (CODEPAGE_MAP[cp]) enc = CODEPAGE_MAP[cp];
+        }
+        pos += dlen;
+      } else if (recType === 2) {
+        // Skip variable record quickly
+        pos += 4; // type
+        const hl = view.getInt32(pos, le); pos += 4;
+        const nm = view.getInt32(pos, le); pos += 4;
+        pos += 4 + 4 + 8; // print, write, name
+        if (hl) {
+          const ll = view.getInt32(pos, le); pos += 4;
+          pos += ll + ((4 - ll % 4) % 4);
+        }
+        pos += Math.abs(nm) * 8;
+      } else if (recType === 3) {
+        const n = view.getInt32(pos, le); pos += 4;
+        for (let i = 0; i < n; i++) {
+          pos += 8; // value (float64)
+          const ll = buf[pos]; pos += 1;
+          const total = 1 + ll;
+          pos += ll + ((8 - total % 8) % 8);
+        }
+      } else if (recType === 4) {
+        const n = view.getInt32(pos, le); pos += 4;
+        pos += n * 4;
+      } else if (recType === 6) {
+        const n = view.getInt32(pos, le); pos += 4;
+        pos += n * 80;
+      } else {
+        break;
+      }
+    }
+    return enc;
+  }
+
+  function pad4(n) { return n + ((4 - (n % 4)) % 4); }
+  function pad8(n) { return n + ((8 - (n % 8)) % 8); }
+
+  function getI32(view, pos, le) { return view.getInt32(pos, le); }
+  function getF64(view, pos, le) { return view.getFloat64(pos, le); }
+
+  function parse(buffer) {
+    const view = new DataView(buffer);
+    const buf  = new Uint8Array(buffer);
+
+    // ── Detect endianness (layout_code at offset 64 should be 2) ──
+    const le = (view.getInt32(64, true) === 2);
+
+    // ── Detect encoding from info records ──
+    const enc = detectEncoding(buf, view, le);
+
+    // ── Header fields ──
+    const nominal  = getI32(view, 68, le);   // total 8-byte slots per case
+    const compress = getI32(view, 72, le);   // 0=none, 1=simple bytecode, 2=zlib
+    const ncasesH  = getI32(view, 80, le);   // -1 if unknown
+    const bias     = getF64(view, 84, le);   // usually 100.0
+
+    let pos = 176; // header is always 176 bytes
+    const variables = [];
+    let pendingValMap = null;
+
+    // ── Dictionary records ──
+    while (pos < buffer.byteLength - 4) {
+      const recType = getI32(view, pos, le); pos += 4;
+
+      if (recType === 999) {
+        pos += 4; // filler
+        break;
+      }
+
+      if (recType === 2) {
+        // ── Variable record ──
+        const typeCode  = getI32(view, pos, le); pos += 4;
+        const hasLabel  = getI32(view, pos, le); pos += 4;
+        const nMissing  = getI32(view, pos, le); pos += 4;
+        pos += 4; // print_format
+        pos += 4; // write_format
+        const name = readStr(buf, pos, 8, enc).trim(); pos += 8;
+
+        let label = '';
+        if (hasLabel) {
+          const llen = getI32(view, pos, le); pos += 4;
+          label = readStr(buf, pos, llen, enc).trim();
+          pos += pad4(llen);
+        }
+        pos += Math.abs(nMissing) * 8;
+
+        // typeCode < -1 means string continuation segment ? skip
+        if (typeCode >= -1) {
+          // -1 = long string continuation, >=0 = real variable
+          if (typeCode >= 0) {
+            variables.push({ name, label, type: typeCode, valMap: {} });
+          }
+          // else: continuation segment, skip (already counted in type width)
+        }
+
+      } else if (recType === 3) {
+        // ── Value label record ──
+        const nLabels = getI32(view, pos, le); pos += 4;
+        const labels = {};
+        for (let i = 0; i < nLabels; i++) {
+          const val   = getF64(view, pos, le); pos += 8;
+          const llen  = buf[pos]; pos += 1;
+          const lbl   = readStr(buf, pos, llen, enc).trim();
+          const total = 1 + llen;
+          pos += llen + ((8 - (total % 8)) % 8);
+          labels[val] = lbl;
+        }
+        pendingValMap = labels;
+
+      } else if (recType === 4) {
+        // ── Value label variables record ──
+        const count = getI32(view, pos, le); pos += 4;
+        for (let i = 0; i < count; i++) {
+          const idx = getI32(view, pos, le) - 1; pos += 4;
+          if (pendingValMap && idx >= 0 && idx < variables.length) {
+            variables[idx].valMap = Object.assign({}, pendingValMap);
+          }
+        }
+        pendingValMap = null;
+
+      } else if (recType === 6) {
+        // ── Document record ──
+        const nLines = getI32(view, pos, le); pos += 4;
+        pos += nLines * 80;
+
+      } else if (recType === 7) {
+        // ── Additional info record ──
+        const subtype = getI32(view, pos, le); pos += 4;
+        const size    = getI32(view, pos, le); pos += 4;
+        const count   = getI32(view, pos, le); pos += 4;
+        const dlen    = size * count;
+
+        if (subtype === 13) {
+          // Long variable names
+          const raw = readStr(buf, pos, dlen, enc).replace(/\u0000/g, '');
+          raw.split('\t').forEach(pair => {
+            const eq = pair.indexOf('=');
+            if (eq > -1) {
+              const shortN = pair.slice(0, eq).trim().toUpperCase();
+              const longN  = pair.slice(eq + 1).trim();
+              const v = variables.find(x => x.name.toUpperCase() === shortN);
+              if (v) v.name = longN;
+            }
+          });
+        }
+        pos += dlen;
+
+      } else {
+        // Unknown record type ? skip (shouldn't happen in normal SAV)
+        break;
+      }
+    }
+
+    // ── Data section ──
+    const dataStart = pos;
+    const ncases    = ncasesH > 0 ? ncasesH : Math.floor((buffer.byteLength - dataStart) / (nominal * 8));
+    const numRows   = [];
+    const strRows   = [];
+
+    if (compress === 0) {
+      // ── Uncompressed ──
+      let dpos = dataStart;
+      for (let r = 0; r < ncases; r++) {
+        const numRow = {}, strRow = {};
+        for (const v of variables) {
+          if (v.type === 0) {
+            const val = getF64(view, dpos, le); dpos += 8;
+            const isMiss = (val > 1.7e308 || isNaN(val));
+            numRow[v.name] = isMiss ? '' : (val % 1 === 0 ? val : parseFloat(val.toFixed(10)));
+            strRow[v.name]  = isMiss ? '' : (v.valMap[val] !== undefined ? v.valMap[val] : numRow[v.name]);
+          } else {
+            const w      = v.type;
+            const padded = pad8(w);
+            numRow[v.name] = readStr(buf, dpos, w, enc);
+            strRow[v.name]  = numRow[v.name];
+            dpos += padded;
+          }
+        }
+        numRows.push(numRow);
+        strRows.push(strRow);
+      }
+
+    } else {
+      // ── Simple bytecode compression ──
+      // Build slot list: each numeric = 1 slot, each string = ceil(width/8) slots
+      const slots = [];
+      for (const v of variables) {
+        if (v.type === 0) {
+          slots.push({ v, slot: 'num' });
+        } else {
+          const n = Math.ceil(v.type / 8);
+          for (let i = 0; i < n; i++) slots.push({ v, slot: 'str', idx: i, total: n });
+        }
+      }
+
+      let dpos    = dataStart;
+      let slotIdx = 0;
+      const curCase = new Array(slots.length).fill(null);
+
+      const flushCase = () => {
+        const numRow = {}, strRow = {};
+        let si = 0;
+        for (const v of variables) {
+          if (v.type === 0) {
+            const val = curCase[si++];
+            const isMiss = (val === null || val > 1.7e308 || isNaN(val));
+            numRow[v.name] = isMiss ? '' : (val % 1 === 0 ? val : parseFloat(val.toFixed(10)));
+            strRow[v.name]  = isMiss ? '' : (v.valMap[val] !== undefined ? v.valMap[val] : numRow[v.name]);
+          } else {
+            const n   = Math.ceil(v.type / 8);
+            const raw = new Uint8Array(n * 8);
+            for (let i = 0; i < n; i++) {
+              const chunk = curCase[si++];
+              if (chunk) raw.set(chunk.slice(0, 8), i * 8);
+            }
+            let s;
+            const rawSlice = raw.slice(0, v.type);
+            s = new TextDecoder(enc).decode(rawSlice).replace(/\u0000/g,'').trimEnd();
+            numRow[v.name] = s;
+            strRow[v.name]  = s;
+          }
+        }
+        numRows.push(numRow);
+        strRows.push(strRow);
+        slotIdx = 0;
+      };
+
+      outer:
+      while (dpos + 8 <= buffer.byteLength && numRows.length < ncases) {
+        const codes = buf.slice(dpos, dpos + 8); dpos += 8;
+        for (const code of codes) {
+          if (numRows.length >= ncases) break outer;
+          if (code === 0)   continue;
+          if (code === 252) break outer;
+          if (code === 253) {
+            // raw 8 bytes follow
+            const raw8 = buf.slice(dpos, dpos + 8); dpos += 8;
+            if (slots[slotIdx].slot === 'num') {
+              const tmp = new DataView(raw8.buffer, raw8.byteOffset, 8);
+              curCase[slotIdx] = tmp.getFloat64(0, le);
+            } else {
+              curCase[slotIdx] = raw8;
+            }
+          } else if (code === 254) {
+            curCase[slotIdx] = (slots[slotIdx].slot === 'num') ? 0 : new Uint8Array(8).fill(0x20);
+          } else if (code === 255) {
+            curCase[slotIdx] = null; // system missing
+          } else {
+            curCase[slotIdx] = code - bias;
+          }
+          slotIdx++;
+          if (slotIdx >= slots.length) flushCase();
+        }
+      }
+    }
+
+    return { variables, numRows, strRows, enc };
+  }
+
+  return { parse };
+})();
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// UI helpers
+// ─────────────────────────────────────────────────────────────────────────
+const files = { 1: null, 2: null };
+
+function log(id, msg, type = 'info') {
+  const box = document.getElementById('log' + id);
+  box.classList.add('show');
+  const line = document.createElement('div');
+  line.className = 'log-line ' + type;
+  line.textContent = msg;
+  box.appendChild(line);
+  box.scrollTop = box.scrollHeight;
+}
+function clearLog(id) {
+  const box = document.getElementById('log' + id);
+  box.innerHTML = '';
+  box.classList.remove('show');
+}
+function setProgress(id, pct, text) {
+  const wrap = document.getElementById('prog' + id);
+  const bar  = document.getElementById('pbar' + id);
+  const txt  = document.getElementById('ptext' + id);
+  if (pct === null) { wrap.classList.remove('show'); return; }
+  wrap.classList.add('show');
+  bar.style.width = pct + '%';
+  txt.textContent = text;
+}
+function clearFile(id) {
+  files[id] = null;
+  document.getElementById('file' + id).value = '';
+  document.getElementById('selected' + id).classList.remove('show');
+  document.getElementById('btn' + id).disabled = true;
+  clearLog(id);
+  setProgress(id, null, '');
+}
+function handleFile(id, file) {
+  if (!file.name.toLowerCase().endsWith('.sav')) { alert('.sav 파일만 지원합니다.'); return; }
+  files[id] = file;
+  document.getElementById('fname' + id).textContent = file.name;
+  document.getElementById('selected' + id).classList.add('show');
+  document.getElementById('btn' + id).disabled = false;
+  clearLog(id);
+  setProgress(id, null, '');
+}
+
+[1, 2].forEach(id => {
+  const input = document.getElementById('file' + id);
+  const drop  = document.getElementById('drop' + id);
+  input.addEventListener('change', e => { if (e.target.files[0]) handleFile(id, e.target.files[0]); });
+  drop.addEventListener('dragover', e => { e.preventDefault(); drop.classList.add('drag-over'); });
+  drop.addEventListener('dragleave', () => drop.classList.remove('drag-over'));
+  drop.addEventListener('drop', e => {
+    e.preventDefault(); drop.classList.remove('drag-over');
+    if (e.dataTransfer.files[0]) handleFile(id, e.dataTransfer.files[0]);
+  });
+});
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// Convert
+// ─────────────────────────────────────────────────────────────────────────
+async function convert(id) {
+  const file = files[id];
+  if (!file) return;
+
+  const btn = document.getElementById('btn' + id);
+  btn.disabled = true;
+  clearLog(id);
+  setProgress(id, 10, '파일 읽는 중...');
+  log(id, `[시작] ${file.name}`);
+
+  try {
+    const buffer = await file.arrayBuffer();
+    setProgress(id, 30, 'SAV 파싱 중...');
+
+    const { variables, numRows, strRows, enc } = SAV.parse(buffer);
+    log(id, `변수 ${variables.length}개 · 케이스 ${numRows.length}개 · 인코딩: ${enc}`);
+    setProgress(id, 60, '엑셀 생성 중...');
+
+    const wb = XLSX.utils.book_new();
+
+    if (id === 1) buildBusiness(wb, variables, numRows, strRows, id);
+    else          buildAcademic(wb, variables, numRows, strRows, id);
+
+    setProgress(id, 90, '파일 저장 중...');
+    const base = file.name.replace(/\.sav$/i, '');
+    XLSX.writeFile(wb, base + '.xlsx');
+
+    setProgress(id, 100, '완료!');
+    log(id, `[완료] ${base}.xlsx 다운로드됨`);
+    setTimeout(() => setProgress(id, null, ''), 2000);
+
+  } catch(e) {
+    log(id, `[오류] ${e.message}`, 'error');
+    console.error(e);
+    setProgress(id, null, '');
+  }
+  btn.disabled = false;
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// 사업부용 빌드
+// ─────────────────────────────────────────────────────────────────────────
+function buildBusiness(wb, variables, numRows, strRows, id) {
+  const cols = variables.map(v => v.name);
+  const headerFill = { fgColor: { rgb: '92D050' } };
+  const boldCenterStyle = { fill: headerFill, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center' } };
+
+  // 1. Numeric
+  const numAoa = [cols, ...numRows.map(r => cols.map(c => r[c]))];
+  const wsNum = XLSX.utils.aoa_to_sheet(numAoa);
+  applyHeaderStyle(wsNum, cols.length, boldCenterStyle);
+  wsNum['!cols'] = cols.map(() => ({ wch: 8.38 }));
+  wsNum['!freeze'] = { xSplit: 1, ySplit: 1 };
+  XLSX.utils.book_append_sheet(wb, wsNum, 'Numeric');
+  log(id, 'Numeric 시트 완료');
+
+  // 2. String
+  const strAoa = [cols, ...strRows.map(r => cols.map(c => r[c]))];
+  const wsStr = XLSX.utils.aoa_to_sheet(strAoa);
+  applyHeaderStyle(wsStr, cols.length, boldCenterStyle);
+  wsStr['!cols'] = cols.map(() => ({ wch: 8.38 }));
+  wsStr['!freeze'] = { xSplit: 1, ySplit: 1 };
+  XLSX.utils.book_append_sheet(wb, wsStr, 'String');
+  log(id, 'String 시트 완료');
+
+  // 3. Variable Labels
+  const varAoa = [['변수명', '변수설명'], ...variables.map(v => [v.name, v.label || ''])];
+  const wsVar = XLSX.utils.aoa_to_sheet(varAoa);
+  applyHeaderStyle(wsVar, 2, boldCenterStyle);
+  wsVar['!cols'] = [{ wch: 15 }, { wch: 60 }];
+  XLSX.utils.book_append_sheet(wb, wsVar, 'Variable Labels');
+  log(id, 'Variable Labels 시트 완료');
+
+  // 4. Codebook
+  const codeAoa = [['변수명', 'Value', 'Label']];
+  variables.forEach(v => {
+    const entries = Object.entries(v.valMap);
+    if (entries.length > 0) {
+      entries.sort((a, b) => parseFloat(a[0]) - parseFloat(b[0])).forEach(([val, lbl], i) => {
+        codeAoa.push([i === 0 ? v.name : '', parseFloat(val), lbl]);
+      });
+    } else {
+      codeAoa.push([v.name, '', '']);
+    }
+    codeAoa.push(['', '', '']);
+  });
+  const wsCode = XLSX.utils.aoa_to_sheet(codeAoa);
+  applyHeaderStyle(wsCode, 3, boldCenterStyle);
+  wsCode['!cols'] = [{ wch: 15 }, { wch: 10 }, { wch: 50 }];
+  XLSX.utils.book_append_sheet(wb, wsCode, 'Codebook');
+  log(id, 'Codebook 시트 완료');
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// 논문용 빌드
+// ─────────────────────────────────────────────────────────────────────────
+function buildAcademic(wb, variables, numRows, strRows, id) {
+  const filtered = variables.filter(v => v.name.toLowerCase() !== 'no');
+  const cols = filtered.map(v => v.name);
+
+  // 1. data
+  const dataAoa = [cols, ...numRows.map(r => cols.map(c => r[c]))];
+  const wsData = XLSX.utils.aoa_to_sheet(dataAoa);
+  XLSX.utils.book_append_sheet(wb, wsData, 'data');
+  log(id, 'data 시트 완료');
+
+  // 2. label
+  const labelAoa = [cols, ...strRows.map(r => cols.map(c => r[c]))];
+  const wsLabel = XLSX.utils.aoa_to_sheet(labelAoa);
+  XLSX.utils.book_append_sheet(wb, wsLabel, 'label');
+  log(id, 'label 시트 완료');
+
+  // 3. code
+  const codeAoa = [];
+  filtered.forEach(v => {
+    codeAoa.push([v.name, v.label || '']);
+    codeAoa.push(['코드값', '보기']);
+    const entries = Object.entries(v.valMap);
+    if (entries.length > 0) {
+      entries.sort((a, b) => parseFloat(a[0]) - parseFloat(b[0])).forEach(([val, lbl]) => {
+        const clean = String(lbl).replace(/^\s*\d+[\)\.\s]+/, '');
+        codeAoa.push([parseFloat(val), clean]);
+      });
+    }
+    codeAoa.push(['', '']);
+  });
+  const wsCode = XLSX.utils.aoa_to_sheet(codeAoa);
+  wsCode['!cols'] = [{ wch: 10 }, { wch: 50 }];
+  XLSX.utils.book_append_sheet(wb, wsCode, 'code');
+  log(id, 'code 시트 완료');
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────
+// 스타일 헬퍼
+// ─────────────────────────────────────────────────────────────────────────
+function applyHeaderStyle(ws, colCount, style) {
+  for (let c = 0; c < colCount; c++) {
+    const addr = XLSX.utils.encode_cell({ r: 0, c });
+    if (ws[addr]) ws[addr].s = style;
+  }
+}
+</script>
+</body>
+</html>
