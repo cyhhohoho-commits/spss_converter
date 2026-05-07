@@ -48,7 +48,7 @@
     .drop-zone { border: 1.5px dashed var(--border); border-radius: 10px; padding: 1.5rem; text-align: center; cursor: pointer; transition: border-color 0.18s, background 0.18s; position: relative; }
     .drop-zone:hover, .drop-zone.drag-over { border-color: var(--accent); background: var(--accent-light); }
     .drop-zone input[type="file"] { position: absolute; inset: 0; opacity: 0; cursor: pointer; }
-    .drop-icon { font-size: 28px; margin-bottom: 8px; }
+    .drop-icon { margin-bottom: 10px; display: flex; justify-content: center; }
     .drop-text { font-size: 13px; font-weight: 500; color: var(--text-primary); }
     .drop-sub { font-size: 11px; color: var(--text-tertiary); margin-top: 3px; }
     /* 파일 목록 */
@@ -106,14 +106,20 @@
     <div class="card-title">Sav to xlsx <span class="tag">사업부용</span></div>
     <div class="card-desc">Numeric · String · Variable Labels · Codebook 4개 시트로 변환<br>여러 파일 선택 시 각각 별도 엑셀로 저장</div>
     <div class="sheet-list">
-      <span class="sheet-tag">?? Numeric</span>
-      <span class="sheet-tag">?? String</span>
-      <span class="sheet-tag">?? Variable Labels</span>
-      <span class="sheet-tag">?? Codebook</span>
+      <span class="sheet-tag">Numeric</span>
+      <span class="sheet-tag">String</span>
+      <span class="sheet-tag">Variable Labels</span>
+      <span class="sheet-tag">Codebook</span>
     </div>
     <div class="drop-zone" id="drop1">
       <input type="file" id="file1" accept=".sav" multiple>
-      <div class="drop-icon">??</div>
+      <div class="drop-icon">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="8" fill="#E1F5EE"/>
+          <path d="M16 8v12M11 15l5 5 5-5" stroke="#1D9E75" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 24h16" stroke="#1D9E75" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
       <div class="drop-text">SAV 파일을 여기에 끌어다 놓거나 클릭</div>
       <div class="drop-sub">.sav 파일 여러 개 동시 선택 가능</div>
     </div>
@@ -131,13 +137,19 @@
     <div class="card-title">Sav to xlsx <span class="tag blue">논문용</span></div>
     <div class="card-desc">data · label · code 3개 시트로 변환<br>여러 파일 선택 시 각각 별도 엑셀로 저장</div>
     <div class="sheet-list">
-      <span class="sheet-tag">?? data</span>
-      <span class="sheet-tag">?? label</span>
-      <span class="sheet-tag">?? code</span>
+      <span class="sheet-tag">data</span>
+      <span class="sheet-tag">label</span>
+      <span class="sheet-tag">code</span>
     </div>
     <div class="drop-zone" id="drop2">
       <input type="file" id="file2" accept=".sav" multiple>
-      <div class="drop-icon">??</div>
+      <div class="drop-icon">
+        <svg width="32" height="32" viewBox="0 0 32 32" fill="none">
+          <rect width="32" height="32" rx="8" fill="#EFF6FF"/>
+          <path d="M16 8v12M11 15l5 5 5-5" stroke="#2563EB" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"/>
+          <path d="M8 24h16" stroke="#2563EB" stroke-width="2" stroke-linecap="round"/>
+        </svg>
+      </div>
       <div class="drop-text">SAV 파일을 여기에 끌어다 놓거나 클릭</div>
       <div class="drop-sub">.sav 파일 여러 개 동시 선택 가능</div>
     </div>
@@ -515,7 +527,7 @@ function renderFileList(id) {
     <div class="file-item" id="fi_${id}_${i}">
       <span class="fi-name" title="${f.name}">${f.name}</span>
       <span class="fi-status" id="fis_${id}_${i}">대기</span>
-      <button class="fi-del" onclick="removeFile(${id},${i})">?</button>
+      <button class="fi-del" onclick="removeFile(${id},${i})" title="삭제">x</button>
     </div>
   `).join('') + `<div class="file-count">총 ${q.length}개 파일</div>`;
   document.getElementById('btn' + id).disabled = false;
@@ -593,12 +605,12 @@ async function convertAll(id) {
       const base = file.name.replace(/\.sav$/i, '');
       XLSX.writeFile(wb, base + '.xlsx');
 
-      setFileStatus(id, i, '? 완료', 'done');
+      setFileStatus(id, i, '완료', 'done');
       log(id, `  → ${base}.xlsx 저장됨`);
       done++;
 
     } catch(e) {
-      setFileStatus(id, i, '? 오류', 'error');
+      setFileStatus(id, i, '오류', 'error');
       log(id, `  오류: ${e.message}`, 'error');
       failed++;
     }
