@@ -5,7 +5,9 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>SAV → Excel 변환기</title>
   <link href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@300;400;500;600&display=swap" rel="stylesheet">
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+  <!-- ExcelJS: 셀 서식(볼드/헤더색/탭색/틀고정/오토필터)을 지원하는 라이브러리.
+       기존 SheetJS 커뮤니티판은 셀 스타일을 무시해서 서식이 적용되지 않아 교체함. -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/exceljs/4.4.0/exceljs.min.js"></script>
   <style>
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
     :root {
@@ -598,12 +600,13 @@ async function convertAll(id) {
       const { variables, numRows, strRows, enc } = SAV.parse(buffer);
       log(id, `  변수 ${variables.length}개 · 케이스 ${numRows.length}개 · ${enc}`);
 
-      const wb = XLSX.utils.book_new();
+      const wb = new ExcelJS.Workbook();
       if (id === 1) buildBusiness(wb, variables, numRows, strRows, id);
       else          buildAcademic(wb, variables, numRows, strRows, id);
 
       const base = file.name.replace(/\.sav$/i, '');
-      XLSX.writeFile(wb, base + '.xlsx');
+      const buf = await wb.xlsx.writeBuffer();
+      downloadXlsx(buf, base + '.xlsx');
 
       setFileStatus(id, i, '완료', 'done');
       log(id, `  → ${base}.xlsx 저장됨`);
@@ -624,108 +627,151 @@ async function convertAll(id) {
 
 
 // ─────────────────────────────────────────────────────────────────────────
-// 사업부용 빌드
+// 사업부용 빌드 (ExcelJS) ? 데스크톱 openpyxl(run_sav_to_xlsx)과 동일한 서식
 // ─────────────────────────────────────────────────────────────────────────
 function buildBusiness(wb, variables, numRows, strRows, id) {
   const cols = variables.map(v => v.name);
-  const headerFill = { fgColor: { rgb: '92D050' } };
-  const boldCenterStyle = { fill: headerFill, font: { bold: true }, alignment: { horizontal: 'center', vertical: 'center' } };
 
-  // 1. Numeric
-  const numAoa = [cols, ...numRows.map(r => cols.map(c => r[c]))];
-  const wsNum = XLSX.utils.aoa_to_sheet(numAoa);
-  applyHeaderStyle(wsNum, cols.length, boldCenterStyle);
-  wsNum['!cols'] = cols.map(() => ({ wch: 8.38 }));
-  wsNum['!freeze'] = { xSplit: 1, ySplit: 1 };
-  XLSX.utils.book_append_sheet(wb, wsNum, 'Numeric');
+  // 시트 탭 색상 (openpyxl tab_colors와 동일)
+  const tabColors = {
+    'Numeric': 'FF19A7CE',
+    'String': 'FF1976D2',
+    'Variable Labels': 'FF7B1FA2',
+    'Codebook': 'FF0D47A1'
+  };
+
+  // 첫 행(헤더) 서식: solid 92D050 채우기 / 볼드 검정 / 가운데 정렬
+  function styleHeader(ws, colCount) {
+    const row = ws.getRow(1);
+    for (let c = 1; c <= colCount; c++) {
+      const cell = row.getCell(c);
+      cell.fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF92D050' } };
+      cell.font = { bold: true, color: { argb: 'FF000000' } };
+      cell.alignment = { horizontal: 'center', vertical: 'center' };
+    }
+  }
+
+  // 1. Numeric (틀 고정 B2 + 오토필터 + 8.38 너비)
+  const wsNum = wb.addWorksheet('Numeric', {
+    properties: { tabColor: { argb: tabColors['Numeric'] } },
+    views: [{ state: 'frozen', xSplit: 1, ySplit: 1 }]
+  });
+  wsNum.addRow(cols);
+  numRows.forEach(r => wsNum.addRow(cols.map(c => r[c])));
+  styleHeader(wsNum, cols.length);
+  wsNum.columns.forEach(col => { col.width = 8.38; });
+  wsNum.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
   log(id, 'Numeric 시트 완료');
 
-  // 2. String
-  const strAoa = [cols, ...strRows.map(r => cols.map(c => r[c]))];
-  const wsStr = XLSX.utils.aoa_to_sheet(strAoa);
-  applyHeaderStyle(wsStr, cols.length, boldCenterStyle);
-  wsStr['!cols'] = cols.map(() => ({ wch: 8.38 }));
-  wsStr['!freeze'] = { xSplit: 1, ySplit: 1 };
-  XLSX.utils.book_append_sheet(wb, wsStr, 'String');
+  // 2. String (틀 고정 B2 + 오토필터 + 8.38 너비)
+  const wsStr = wb.addWorksheet('String', {
+    properties: { tabColor: { argb: tabColors['String'] } },
+    views: [{ state: 'frozen', xSplit: 1, ySplit: 1 }]
+  });
+  wsStr.addRow(cols);
+  strRows.forEach(r => wsStr.addRow(cols.map(c => r[c])));
+  styleHeader(wsStr, cols.length);
+  wsStr.columns.forEach(col => { col.width = 8.38; });
+  wsStr.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: cols.length } };
   log(id, 'String 시트 완료');
 
   // 3. Variable Labels
-  const varAoa = [['변수명', '변수설명'], ...variables.map(v => [v.name, v.label || ''])];
-  const wsVar = XLSX.utils.aoa_to_sheet(varAoa);
-  applyHeaderStyle(wsVar, 2, boldCenterStyle);
-  wsVar['!cols'] = [{ wch: 15 }, { wch: 60 }];
-  XLSX.utils.book_append_sheet(wb, wsVar, 'Variable Labels');
+  const wsVar = wb.addWorksheet('Variable Labels', {
+    properties: { tabColor: { argb: tabColors['Variable Labels'] } }
+  });
+  wsVar.addRow(['변수명', '변수설명']);
+  variables.forEach(v => wsVar.addRow([v.name, v.label || '']));
+  styleHeader(wsVar, 2);
+  wsVar.getColumn(1).width = 15.38;
+  wsVar.getColumn(2).width = 99.38;
+  wsVar.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 2 } };
   log(id, 'Variable Labels 시트 완료');
 
   // 4. Codebook
-  const codeAoa = [['변수명', 'Value', 'Label']];
+  const wsCode = wb.addWorksheet('Codebook', {
+    properties: { tabColor: { argb: tabColors['Codebook'] } }
+  });
+  wsCode.addRow(['변수명', 'Value', 'Label']);
   variables.forEach(v => {
     const entries = Object.entries(v.valMap);
     if (entries.length > 0) {
       entries.sort((a, b) => parseFloat(a[0]) - parseFloat(b[0])).forEach(([val, lbl], i) => {
-        codeAoa.push([i === 0 ? v.name : '', parseFloat(val), lbl]);
+        wsCode.addRow([i === 0 ? v.name : '', parseFloat(val), lbl]);
       });
     } else {
-      codeAoa.push([v.name, '', '']);
+      wsCode.addRow([v.name, '', '']);
     }
-    codeAoa.push(['', '', '']);
+    wsCode.addRow(['', '', '']);
   });
-  const wsCode = XLSX.utils.aoa_to_sheet(codeAoa);
-  applyHeaderStyle(wsCode, 3, boldCenterStyle);
-  wsCode['!cols'] = [{ wch: 15 }, { wch: 10 }, { wch: 50 }];
-  XLSX.utils.book_append_sheet(wb, wsCode, 'Codebook');
+  styleHeader(wsCode, 3);
+  wsCode.getColumn(1).width = 8.38;
+  wsCode.getColumn(2).width = 8.38;
+  wsCode.getColumn(3).width = 79.38;
+  wsCode.autoFilter = { from: { row: 1, column: 1 }, to: { row: 1, column: 3 } };
   log(id, 'Codebook 시트 완료');
+
+  // 처음 열리는 시트 = 첫 번째 시트(Numeric)
+  wb.views = [{ activeTab: 0 }];
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────
-// 논문용 빌드
+// 논문용 빌드 (ExcelJS) ? data/label은 평문, 헤더 강조 없음 (run_function_2와 동일)
 // ─────────────────────────────────────────────────────────────────────────
 function buildAcademic(wb, variables, numRows, strRows, id) {
   const filtered = variables.filter(v => v.name.toLowerCase() !== 'no');
   const cols = filtered.map(v => v.name);
 
-  // 1. data
-  const dataAoa = [cols, ...numRows.map(r => cols.map(c => r[c]))];
-  const wsData = XLSX.utils.aoa_to_sheet(dataAoa);
-  XLSX.utils.book_append_sheet(wb, wsData, 'data');
+  // 1. data (평문)
+  const wsData = wb.addWorksheet('data');
+  wsData.addRow(cols);
+  numRows.forEach(r => wsData.addRow(cols.map(c => r[c])));
   log(id, 'data 시트 완료');
 
-  // 2. label
-  const labelAoa = [cols, ...strRows.map(r => cols.map(c => r[c]))];
-  const wsLabel = XLSX.utils.aoa_to_sheet(labelAoa);
-  XLSX.utils.book_append_sheet(wb, wsLabel, 'label');
+  // 2. label (평문)
+  const wsLabel = wb.addWorksheet('label');
+  wsLabel.addRow(cols);
+  strRows.forEach(r => wsLabel.addRow(cols.map(c => r[c])));
   log(id, 'label 시트 완료');
 
   // 3. code
-  const codeAoa = [];
+  const wsCode = wb.addWorksheet('code');
   filtered.forEach(v => {
-    codeAoa.push([v.name, v.label || '']);
-    codeAoa.push(['코드값', '보기']);
+    wsCode.addRow([v.name, v.label || '']);
+    wsCode.addRow(['코드값', '보기']);
     const entries = Object.entries(v.valMap);
     if (entries.length > 0) {
       entries.sort((a, b) => parseFloat(a[0]) - parseFloat(b[0])).forEach(([val, lbl]) => {
         const clean = String(lbl).replace(/^\s*\d+[\)\.\s]+/, '');
-        codeAoa.push([parseFloat(val), clean]);
+        wsCode.addRow([parseFloat(val), clean]);
       });
     }
-    codeAoa.push(['', '']);
+    wsCode.addRow(['', '']);
   });
-  const wsCode = XLSX.utils.aoa_to_sheet(codeAoa);
-  wsCode['!cols'] = [{ wch: 10 }, { wch: 50 }];
-  XLSX.utils.book_append_sheet(wb, wsCode, 'code');
+  wsCode.getColumn(1).width = 10;
+  wsCode.getColumn(2).width = 50;
   log(id, 'code 시트 완료');
+
+  // 처음 열리는 시트 = 첫 번째 시트(data)
+  wb.views = [{ activeTab: 0 }];
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────
-// 스타일 헬퍼
+// 다운로드 헬퍼 ? ExcelJS writeBuffer 결과를 .xlsx 파일로 저장
 // ─────────────────────────────────────────────────────────────────────────
-function applyHeaderStyle(ws, colCount, style) {
-  for (let c = 0; c < colCount; c++) {
-    const addr = XLSX.utils.encode_cell({ r: 0, c });
-    if (ws[addr]) ws[addr].s = style;
-  }
+function downloadXlsx(buffer, filename) {
+  const blob = new Blob([buffer], {
+    type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+  });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 </script>
 </body>
