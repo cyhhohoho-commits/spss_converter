@@ -286,6 +286,9 @@ const SAV = (() => {
 
     let pos = 176; // header is always 176 bytes
     const variables = [];
+    const dictToVar = []; // 물리적 사전 인덱스 → variables[] 인덱스 (연속 레코드는 -1)
+    let dictIdx = 0;      // 물리적 type-2 레코드 카운터 (연속 레코드 포함)
+    const vlsMap = {};    // 매우 긴 문자열(>255): 짧은변수명(대문자) → 총 폭 (subtype-14)
     let pendingValMap = null;
 
     // ── Dictionary records ──
@@ -316,11 +319,18 @@ const SAV = (() => {
 
         // typeCode < -1 means string continuation segment ? skip
         if (typeCode >= -1) {
-          // -1 = long string continuation, >=0 = real variable
+          // 물리적 사전 인덱스(연속 레코드 포함)를 variables[] 인덱스로 매핑한다.
+          // 8바이트 초과 문자열 변수는 연속 레코드(typeCode=-1)를 만드는데,
+          // type-4(Value label variables) 레코드의 변수 인덱스는 이 연속 레코드까지
+          // 세므로, 매핑 없이 variables[idx]로 접근하면 롱스트링 이후 value label이
+          // 엉뚱한 변수에 붙거나 사라진다(코드북 오류).
           if (typeCode >= 0) {
-            variables.push({ name, label, type: typeCode, valMap: {} });
+            variables.push({ name, short: name.toUpperCase(), label, type: typeCode, valMap: {} });
+            dictToVar[dictIdx] = variables.length - 1;
+          } else {
+            dictToVar[dictIdx] = -1; // 연속 레코드 → 실제 변수 아님
           }
-          // else: continuation segment, skip (already counted in type width)
+          dictIdx++;
         }
 
       } else if (recType === 3) {
@@ -339,11 +349,14 @@ const SAV = (() => {
 
       } else if (recType === 4) {
         // ── Value label variables record ──
+        // 인덱스는 물리적 사전 인덱스(연속 레코드 포함, 1-based)이므로
+        // dictToVar로 실제 variables[] 인덱스로 변환한다.
         const count = getI32(view, pos, le); pos += 4;
         for (let i = 0; i < count; i++) {
-          const idx = getI32(view, pos, le) - 1; pos += 4;
-          if (pendingValMap && idx >= 0 && idx < variables.length) {
-            variables[idx].valMap = Object.assign({}, pendingValMap);
+          const dIdx = getI32(view, pos, le) - 1; pos += 4;
+          const vIdx = dictToVar[dIdx];
+          if (pendingValMap && vIdx !== undefined && vIdx >= 0) {
+            variables[vIdx].valMap = Object.assign({}, pendingValMap);
           }
         }
         pendingValMap = null;
@@ -368,8 +381,19 @@ const SAV = (() => {
             if (eq > -1) {
               const shortN = pair.slice(0, eq).trim().toUpperCase();
               const longN  = pair.slice(eq + 1).trim();
-              const v = variables.find(x => x.name.toUpperCase() === shortN);
+              const v = variables.find(x => x.short === shortN);
               if (v) v.name = longN;
+            }
+          });
+        } else if (subtype === 14) {
+          // Very long strings(>255): "SHORT=width\0\t..." → 총 폭 매핑
+          const raw = readStr(buf, pos, dlen, enc).replace(/ /g, '');
+          raw.split('\t').forEach(pair => {
+            const eq = pair.indexOf('=');
+            if (eq > -1) {
+              const nm = pair.slice(0, eq).trim().toUpperCase();
+              const w  = parseInt(pair.slice(eq + 1).trim(), 10);
+              if (nm && w > 0) vlsMap[nm] = w;
             }
           });
         }
@@ -399,11 +423,10 @@ const SAV = (() => {
             numRow[v.name] = isMiss ? '' : (val % 1 === 0 ? val : parseFloat(val.toFixed(10)));
             strRow[v.name]  = isMiss ? '' : (v.valMap[val] !== undefined ? v.valMap[val] : numRow[v.name]);
           } else {
-            const w      = v.type;
-            const padded = pad8(w);
-            numRow[v.name] = readStr(buf, dpos, w, enc);
+            // 문자열은 raw 바이트로 보관 (뒤에서 VLS 병합 후 일괄 디코드)
+            numRow[v.name] = buf.slice(dpos, dpos + v.type);
             strRow[v.name]  = numRow[v.name];
-            dpos += padded;
+            dpos += pad8(v.type);
           }
         }
         numRows.push(numRow);
@@ -443,11 +466,9 @@ const SAV = (() => {
               const chunk = curCase[si++];
               if (chunk) raw.set(chunk.slice(0, 8), i * 8);
             }
-            let s;
-            const rawSlice = raw.slice(0, v.type);
-            s = new TextDecoder(enc).decode(rawSlice).replace(/\u0000/g,'').trimEnd();
-            numRow[v.name] = s;
-            strRow[v.name]  = s;
+            // 문자열은 raw 바이트로 보관 (뒤에서 VLS 병합 후 일괄 디코드)
+            numRow[v.name] = raw.slice(0, v.type);
+            strRow[v.name]  = numRow[v.name];
           }
         }
         numRows.push(numRow);
@@ -484,7 +505,70 @@ const SAV = (() => {
       }
     }
 
+    // ── 문자열 최종화: 매우 긴 문자열(VLS) 세그먼트 병합 + 바이트 단위 디코드 ──
+    finalizeStrings(variables, numRows, strRows, vlsMap, enc);
+
     return { variables, numRows, strRows, enc };
+  }
+
+  // 문자열 셀(raw 바이트)을 최종 텍스트로 변환한다.
+  // 매우 긴 문자열(>255)은 subtype-14 총 폭에 따라 연속된 세그먼트 변수들의
+  // 바이트를 이어붙여(멀티바이트가 세그먼트 경계에서 쪼개져도 안전) 디코드하고,
+  // 흡수된 세그먼트 변수는 결과 변수 목록·데이터에서 제거한다.
+  function finalizeStrings(variables, numRows, strRows, vlsMap, enc) {
+    const dec = new TextDecoder(enc || 'utf-8');
+    const toText = (bytes, width) => {
+      if (!(bytes instanceof Uint8Array)) return bytes || '';
+      const arr = (width != null) ? bytes.subarray(0, width) : bytes;
+      return dec.decode(arr).replace(/\x00/g, '').replace(/[ \t]+$/, '');
+    };
+    const removeIdx = new Set();
+    for (let vi = 0; vi < variables.length; vi++) {
+      const v = variables[vi];
+      if (v.type <= 0) continue; // 숫자형은 읽는 단계에서 이미 확정됨
+      const W = vlsMap[v.short];
+      if (W != null && W > 0) {
+        // 매우 긴 문자열: 헤드 + 다음 (nseg-1)개 세그먼트 변수의 바이트를 병합
+        const nseg = Math.ceil(W / 252);
+        const segs = [];
+        for (let k = 0; k < nseg && vi + k < variables.length; k++) segs.push(variables[vi + k]);
+        for (let r = 0; r < numRows.length; r++) {
+          let total = 0;
+          for (const sv of segs) {
+            const b = numRows[r][sv.name];
+            if (b instanceof Uint8Array) total += b.length;
+          }
+          const merged = new Uint8Array(total);
+          let off = 0;
+          for (const sv of segs) {
+            const b = numRows[r][sv.name];
+            if (b instanceof Uint8Array) { merged.set(b, off); off += b.length; }
+          }
+          const s = toText(merged, W);
+          numRows[r][v.name] = s;
+          strRows[r][v.name]  = s;
+        }
+        for (let k = 1; k < segs.length; k++) removeIdx.add(vi + k);
+        vi += nseg - 1; // 세그먼트 변수 건너뛰기
+      } else {
+        // 일반 문자열: raw 바이트 디코드
+        for (let r = 0; r < numRows.length; r++) {
+          const s = toText(numRows[r][v.name], null);
+          numRows[r][v.name] = s;
+          strRows[r][v.name]  = s;
+        }
+      }
+    }
+    if (removeIdx.size) {
+      const names = [];
+      removeIdx.forEach(i => names.push(variables[i].name));
+      for (const nm of names) {
+        for (let r = 0; r < numRows.length; r++) { delete numRows[r][nm]; delete strRows[r][nm]; }
+      }
+      const kept = variables.filter((_, i) => !removeIdx.has(i));
+      variables.length = 0;
+      for (const kv of kept) variables.push(kv);
+    }
   }
 
   return { parse };
@@ -627,7 +711,7 @@ async function convertAll(id) {
 
 
 // ─────────────────────────────────────────────────────────────────────────
-// 사업부용 빌드 (ExcelJS) ? 데스크톱 openpyxl(run_sav_to_xlsx)과 동일한 서식
+// 사업부용 빌드 (ExcelJS) — 데스크톱 openpyxl(run_sav_to_xlsx)과 동일한 서식
 // ─────────────────────────────────────────────────────────────────────────
 function buildBusiness(wb, variables, numRows, strRows, id) {
   const cols = variables.map(v => v.name);
@@ -716,7 +800,7 @@ function buildBusiness(wb, variables, numRows, strRows, id) {
 
 
 // ─────────────────────────────────────────────────────────────────────────
-// 논문용 빌드 (ExcelJS) ? data/label은 평문, 헤더 강조 없음 (run_function_2와 동일)
+// 논문용 빌드 (ExcelJS) — data/label은 평문, 헤더 강조 없음 (run_function_2와 동일)
 // ─────────────────────────────────────────────────────────────────────────
 function buildAcademic(wb, variables, numRows, strRows, id) {
   const filtered = variables.filter(v => v.name.toLowerCase() !== 'no');
@@ -758,7 +842,7 @@ function buildAcademic(wb, variables, numRows, strRows, id) {
 
 
 // ─────────────────────────────────────────────────────────────────────────
-// 다운로드 헬퍼 ? ExcelJS writeBuffer 결과를 .xlsx 파일로 저장
+// 다운로드 헬퍼 — ExcelJS writeBuffer 결과를 .xlsx 파일로 저장
 // ─────────────────────────────────────────────────────────────────────────
 function downloadXlsx(buffer, filename) {
   const blob = new Blob([buffer], {
