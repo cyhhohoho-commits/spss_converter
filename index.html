@@ -803,8 +803,9 @@ function buildBusiness(wb, variables, numRows, strRows, id) {
 // 논문용 빌드 (ExcelJS) — data/label은 평문, 헤더 강조 없음 (run_function_2와 동일)
 // ─────────────────────────────────────────────────────────────────────────
 function buildAcademic(wb, variables, numRows, strRows, id) {
-  const filtered = variables.filter(v => v.name.toLowerCase() !== 'no');
-  const cols = filtered.map(v => v.name);
+  // 데스크톱 원본과 동일: data/label 은 전체 변수(no 포함), code(코드북)에서만 no 제외
+  const cols = variables.map(v => v.name);
+  const codeVars = variables.filter(v => v.name.toLowerCase() !== 'no');
 
   // 1. data (평문)
   const wsData = wb.addWorksheet('data');
@@ -820,7 +821,7 @@ function buildAcademic(wb, variables, numRows, strRows, id) {
 
   // 3. code
   const wsCode = wb.addWorksheet('code');
-  filtered.forEach(v => {
+  codeVars.forEach(v => {
     wsCode.addRow([v.name, v.label || '']);
     wsCode.addRow(['코드값', '보기']);
     const entries = Object.entries(v.valMap);
